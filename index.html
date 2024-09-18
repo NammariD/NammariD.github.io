@@ -1,137 +1,403 @@
 <!DOCTYPE html>
 <html>
-<head>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<style>
-canvas {
-    border:1px solid #d3d3d3;
-    background-color: #f1f1f1;
-}
-</style>
-</head>
-<body onload="startGame()">
-<script>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <style>
+      canvas {
+        border: 1px solid #d3d3d3;
+        background-color: #f1f1f1;
+      }
+      #restartButton,
+      #pauseButton {
+        display: none;
+        margin-top: 20px;
+        padding: 10px 20px;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      #restartButton:hover,
+      #pauseButton:hover {
+        background-color: #45a049;
+      }
+      #startButton {
+        padding: 10px 20px;
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      #startButton:hover {
+        background-color: #45a049;
+      }
+      #pauseButton {
+        background-color: #f44336;
+      }
+      #pauseButton:hover {
+        background-color: #d32f2f;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      var myGamePiece;
+      var myObstacles = [];
+      var myBoxes = [];
+      var myLasers = [];
+      var myScore = 0;
+      var background;
+      var backgroundMusic;
+      var gameStopped = false;
+      var laserCooldown = false;
+      var isPaused = false;
+      var myScoreCount = 0;
 
-var myGamePiece;
-var myObstacles = [];
-var myScore;
+      function startGame() {
+        document.getElementById("restartButton").style.display = "none";
+        document.getElementById("pauseButton").style.display = "inline";
+        gameStopped = false;
 
-function startGame() {
-    myGamePiece = new component(30, 30, "blue", 10, 120);
-    myGamePiece.gravity = 0.05;
-    myScore = new component("30px", "Consolas", "black", 280, 40, "text");
-    myGameArea.start();
-}
+        // Initialize score count
+        myScoreCount = 0;
 
-var myGameArea = {
-    canvas : document.createElement("canvas"),
-    start : function() {
-        this.canvas.width = 480;
-        this.canvas.height = 270;
-        this.context = this.canvas.getContext("2d");
-        document.body.insertBefore(this.canvas, document.body.childNodes[0]);
-        this.frameNo = 0;
-        this.interval = setInterval(updateGameArea, 20);
+        background = new component(
+          480,
+          270,
+          "star-4773_256.gif",
+          0,
+          0,
+          "background"
+        );
+        myGamePiece = new component(
+          30,
+          30,
+          "ship_sidesC.png",
+          10,
+          120,
+          "image"
+        );
+        myScore = new component("30px", "Consolas", "white", 280, 40, "text");
+        myObstacles = []; // Reset obstacles
+        myBoxes = []; // Reset boxes
+        myLasers = []; // Reset lasers
+        myGameArea.start();
+        myScore.text = "SCORE: 0";
+      }
+
+      var myGameArea = {
+        canvas: document.createElement("canvas"),
+        start: function () {
+          this.canvas.width = 480;
+          this.canvas.height = 270;
+          this.context = this.canvas.getContext("2d");
+          document.body.insertBefore(this.canvas, document.body.childNodes[0]);
+          this.frameNo = 0;
+          this.interval = setInterval(updateGameArea, 20);
+
+          // Capture keyboard events
+          window.addEventListener("keydown", function (e) {
+            myGameArea.keys = myGameArea.keys || [];
+            myGameArea.keys[e.keyCode] = true;
+
+            // Fire laser on spacebar press
+            if (e.keyCode == 32 && !laserCooldown) {
+              fireLaser();
+            }
+          });
+          window.addEventListener("keyup", function (e) {
+            myGameArea.keys[e.keyCode] = false;
+          });
         },
-    clear : function() {
-        this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    }
-}
+        clear: function () {
+          this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        },
+        stop: function () {
+          clearInterval(this.interval);
+          gameStopped = true;
+          document.getElementById("restartButton").style.display = "block";
+          document.getElementById("pauseButton").style.display = "none";
+        },
+      };
 
-function component(width, height, color, x, y, type) {
-    this.type = type;
-    this.score = 0;
-    this.width = width;
-    this.height = height;
-    this.speedX = 0;
-    this.speedY = 0;    
-    this.x = x;
-    this.y = y;
-    this.gravity = 0;
-    this.gravitySpeed = 0;
-    this.update = function() {
-        ctx = myGameArea.context;
-        if (this.type == "text") {
+      function pauseGame() {
+        if (!isPaused) {
+          clearInterval(myGameArea.interval); // Pause the game
+          document.getElementById("pauseButton").textContent = "Resume";
+        } else {
+          myGameArea.interval = setInterval(updateGameArea, 20); // Resume the game
+          document.getElementById("pauseButton").textContent = "Pause";
+        }
+        isPaused = !isPaused;
+      }
+
+      function component(width, height, color, x, y, type) {
+        this.type = type;
+        this.width = width;
+        this.height = height;
+        this.speedX = 0;
+        this.speedY = 0;
+        this.x = x;
+        this.y = y;
+
+        if (this.type == "image" || this.type == "background") {
+          this.image = new Image();
+          this.image.src = color;
+        }
+
+        this.update = function () {
+          ctx = myGameArea.context;
+          if (this.type == "text") {
             ctx.font = this.width + " " + this.height;
             ctx.fillStyle = color;
             ctx.fillText(this.text, this.x, this.y);
-        } else {
+          } else if (this.type == "image" || this.type == "background") {
+            if (this.type == "background") {
+              ctx.drawImage(
+                this.image,
+                this.x,
+                this.y,
+                this.width,
+                this.height
+              );
+            } else {
+              ctx.save();
+              ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+              ctx.rotate(Math.PI / 2);
+              ctx.drawImage(
+                this.image,
+                -this.height / 2,
+                -this.width / 2,
+                this.height,
+                this.width
+              );
+              ctx.restore();
+            }
+          } else {
             ctx.fillStyle = color;
             ctx.fillRect(this.x, this.y, this.width, this.height);
-        }
-    }
-    this.newPos = function() {
-        this.gravitySpeed += this.gravity;
-        this.x += this.speedX;
-        this.y += this.speedY + this.gravitySpeed;
-        this.hitBottom();
-    }
-    this.hitBottom = function() {
-        var rockbottom = myGameArea.canvas.height - this.height;
-        if (this.y > rockbottom) {
-            this.y = rockbottom;
-            this.gravitySpeed = 0;
-        }
-    }
-    this.crashWith = function(otherobj) {
-        var myleft = this.x;
-        var myright = this.x + (this.width);
-        var mytop = this.y;
-        var mybottom = this.y + (this.height);
-        var otherleft = otherobj.x;
-        var otherright = otherobj.x + (otherobj.width);
-        var othertop = otherobj.y;
-        var otherbottom = otherobj.y + (otherobj.height);
-        var crash = true;
-        if ((mybottom < othertop) || (mytop > otherbottom) || (myright < otherleft) || (myleft > otherright)) {
+          }
+        };
+
+        this.newPos = function () {
+          this.x += this.speedX;
+          this.y += this.speedY;
+          this.hitBounds();
+        };
+
+        this.hitBounds = function () {
+          var rightEdge = myGameArea.canvas.width - this.width;
+          var bottomEdge = myGameArea.canvas.height - this.height;
+          if (this.x < 0) this.x = 0;
+          if (this.x > rightEdge) this.x = rightEdge;
+          if (this.y < 0) this.y = 0;
+          if (this.y > bottomEdge) this.y = bottomEdge;
+        };
+
+        this.crashWith = function (otherobj) {
+          var myleft = this.x;
+          var myright = this.x + this.width;
+          var mytop = this.y;
+          var mybottom = this.y + this.height;
+          var otherleft = otherobj.x;
+          var otherright = otherobj.x + otherobj.width;
+          var othertop = otherobj.y;
+          var otherbottom = otherobj.y + otherobj.height;
+          var crash = true;
+          if (
+            mybottom < othertop ||
+            mytop > otherbottom ||
+            myright < otherleft ||
+            myleft > otherright
+          ) {
             crash = false;
-        }
-        return crash;
-    }
-}
+          }
+          return crash;
+        };
+      }
 
-function updateGameArea() {
-    var x, height, gap, minHeight, maxHeight, minGap, maxGap;
-    for (i = 0; i < myObstacles.length; i += 1) {
-        if (myGamePiece.crashWith(myObstacles[i])) {
+      function updateGameArea() {
+        if (gameStopped) return;
+
+        var x, height, gap, minHeight, maxHeight, minGap, maxGap;
+        for (i = 0; i < myObstacles.length; i += 1) {
+          if (myGamePiece.crashWith(myObstacles[i])) {
+            backgroundMusic.pause();
+            myGameArea.stop();
             return;
-        } 
-    }
-    myGameArea.clear();
-    myGameArea.frameNo += 1;
-    if (myGameArea.frameNo == 1 || everyinterval(150)) {
-        x = myGameArea.canvas.width;
-        minHeight = 20;
-        maxHeight = 200;
-        height = Math.floor(Math.random()*(maxHeight-minHeight+1)+minHeight);
-        minGap = 50;
-        maxGap = 200;
-        gap = Math.floor(Math.random()*(maxGap-minGap+1)+minGap);
-        myObstacles.push(new component(10, height, "green", x, 0));
-        myObstacles.push(new component(10, x - height - gap, "green", x, height + gap));
-    }
-    for (i = 0; i < myObstacles.length; i += 1) {
-        myObstacles[i].x += -1;
-        myObstacles[i].update();
-    }
-    myScore.text="SCORE: " + myGameArea.frameNo;
-    myScore.update();
-    myGamePiece.newPos();
-    myGamePiece.update();
-}
+          }
+        }
 
-function everyinterval(n) {
-    if ((myGameArea.frameNo / n) % 1 == 0) {return true;}
-    return false;
-}
+        // Laser collision with obstacles and boxes
+        for (i = 0; i < myLasers.length; i += 1) {
+          for (j = 0; j < myObstacles.length; j += 1) {
+            if (myLasers[i].crashWith(myObstacles[j])) {
+              // Remove laser upon collision
+              myLasers.splice(i, 1);
+              // Break to avoid removing multiple lasers at once
+              break;
+            }
+          }
+          for (k = 0; k < myBoxes.length; k += 1) {
+            if (myLasers[i].crashWith(myBoxes[k])) {
+              // Remove box and laser upon collision
+              myBoxes.splice(k, 1);
+              myLasers.splice(i, 1);
 
-function accelerate(n) {
-    myGamePiece.gravity = n;
-}
-</script>
-<br>
-<button onmousedown="accelerate(-0.2)" onmouseup="accelerate(0.05)">ACCELERATE</button>
-<p>Use the ACCELERATE button to stay in the air</p>
-<p>How long can you stay alive?</p>
-</body>
+              // Update score when a box is hit
+              myScore.text = "SCORE: " + ++myScoreCount;
+              break;
+            }
+          }
+        }
+
+        myGameArea.clear();
+        background.update();
+        myGameArea.frameNo += 1;
+
+        // Generate new obstacles and boxes
+        if (myGameArea.frameNo == 1 || everyinterval(150)) {
+          x = myGameArea.canvas.width;
+          minHeight = 20;
+          maxHeight = 200;
+          height = Math.floor(
+            Math.random() * (maxHeight - minHeight + 1) + minHeight
+          );
+          minGap = 50;
+          maxGap = 200;
+          gap = Math.floor(Math.random() * (maxGap - minGap + 1) + minGap);
+          myObstacles.push(
+            new component(10, height, "pole.png", x, 0, "image")
+          );
+          myObstacles.push(
+            new component(
+              10,
+              x - height - gap,
+              "pole.png",
+              x,
+              height + gap,
+              "image"
+            )
+          );
+          // Add a box between the poles
+          myBoxes.push(
+            new component(
+              20,
+              20,
+              "stormtrooper.png",
+              x,
+              height + gap / 2 - 10,
+              "image"
+            )
+          );
+        }
+
+        // Update obstacles
+        for (i = 0; i < myObstacles.length; i += 1) {
+          myObstacles[i].x += -1;
+          myObstacles[i].update();
+        }
+
+        // Update boxes
+        for (i = 0; i < myBoxes.length; i += 1) {
+          myBoxes[i].x += -1;
+          myBoxes[i].update();
+        }
+
+        // Update lasers
+        for (i = 0; i < myLasers.length; i += 1) {
+          myLasers[i].x += 3; // Move laser forward
+          myLasers[i].update();
+
+          // Remove laser if it goes off-screen
+          if (myLasers[i].x > myGameArea.canvas.width) {
+            myLasers.splice(i, 1);
+          }
+        }
+
+        // Control game piece with arrow keys
+        myGamePiece.speedX = 0;
+        myGamePiece.speedY = 0;
+        if (myGameArea.keys && myGameArea.keys[37]) {
+          myGamePiece.speedX = -2; // Move left
+        }
+        if (myGameArea.keys && myGameArea.keys[39]) {
+          myGamePiece.speedX = 2; // Move right
+        }
+        if (myGameArea.keys && myGameArea.keys[38]) {
+          myGamePiece.speedY = -2; // Move up
+        }
+        if (myGameArea.keys && myGameArea.keys[40]) {
+          myGamePiece.speedY = 2; // Move down
+        }
+
+        myGamePiece.newPos();
+        myGamePiece.update();
+
+        // Update score display
+        myScore.update();
+      }
+
+      function fireLaser() {
+        var laser = new component(
+          5,
+          2,
+          "red",
+          myGamePiece.x + myGamePiece.width,
+          myGamePiece.y + myGamePiece.height / 2,
+          "laser"
+        );
+        myLasers.push(laser);
+
+        // Play laser sound
+        var laserSound = document.getElementById("laserSound");
+        laserSound.play();
+
+        // Set cooldown to prevent continuous shooting
+        laserCooldown = true;
+        setTimeout(function () {
+          laserCooldown = false;
+        }, 300); // Adjust cooldown duration as needed
+      }
+
+      function everyinterval(n) {
+        if ((myGameArea.frameNo / n) % 1 == 0) {
+          return true;
+        }
+        return false;
+      }
+
+      function startGameWithMusic() {
+        backgroundMusic = document.getElementById("bgMusic");
+
+        // Hide the start button when the game starts
+        document.getElementById("startButton").style.display = "none";
+
+        // Reset music if already playing
+        backgroundMusic.pause();
+        backgroundMusic.currentTime = 0;
+
+        backgroundMusic.play();
+        startGame();
+      }
+    </script>
+
+    <audio id="bgMusic" loop>
+      <source src="BackgroundMusic.mp3" type="audio/mpeg" />
+      Your browser does not support the audio element.
+    </audio>
+    <audio id="laserSound">
+      <source src="laser.mp3" type="audio/mpeg" />
+      Your browser does not support the audio element.
+    </audio>
+
+    <br />
+    <button id="startButton" onclick="startGameWithMusic()">Start Game</button>
+    <button id="restartButton" onclick="startGameWithMusic()">
+      Restart Game
+    </button>
+    <button id="pauseButton" onclick="pauseGame()" style="display: none">
+      Pause
+    </button>
+  </body>
 </html>
