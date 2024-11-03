@@ -207,16 +207,28 @@
 
       let selectedPiece = null;
 
-      scene.onPointerDown = (evt, pickResult) => {
-        if (selectedPiece) {
-          const pickedTile = pickResult.pickedMesh;
-          if (pickedTile && pickedTile.name.startsWith("tile")) {
-            selectedPiece.position.x = pickedTile.position.x;
-            selectedPiece.position.z = pickedTile.position.z;
+scene.onPointerDown = (evt, pickResult) => {
+    const pickedMesh = pickResult.pickedMesh;
+
+    // Check if a piece is selected
+    if (selectedPiece) {
+        // If a tile is clicked, move the selected piece there
+        if (pickedMesh && pickedMesh.name.startsWith("tile")) {
+            // Move the piece to the center of the selected tile
+            selectedPiece.position.x = pickedMesh.position.x;
+            selectedPiece.position.z = pickedMesh.position.z;
+
+            // Deselect the piece after moving
             selectedPiece = null;
-          }
         }
-      };
+    } else {
+        // If no piece is selected, check if a piece is clicked
+        if (pickedMesh && pickedMesh.actionManager) {
+            // Select the clicked piece
+            selectedPiece = pickedMesh;
+        }
+    }
+};
 
       document.getElementById("exportButton").addEventListener("click", () => {
         pieces.forEach((piece) => {
