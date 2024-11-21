@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Chess Canvas Project</title>
+  <title>Chess Game</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -52,7 +52,7 @@
 <body>
   <div class="App">
     <header class="App-header">
-      <h1 id="game-title">Chess Canvas Project</h1>
+      <h1 id="game-title">Chess Game</h1>
       <button id="start-button">Start Game</button>
       <div id="game-info" style="display: none;">
         <h1>Chess</h1>
@@ -92,21 +92,6 @@
       P: "https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg",
     };
 
-    const pieceNames = {
-      p: "pawn",
-      r: "rook",
-      n: "knight",
-      b: "bishop",
-      q: "queen",
-      k: "king",
-      P: "pawn",
-      R: "rook",
-      N: "knight",
-      B: "bishop",
-      Q: "queen",
-      K: "king",
-    };
-
     let game = JSON.parse(JSON.stringify(initialGameState));
     let turn = "white";
     let selectedSquare = null;
@@ -117,14 +102,62 @@
     const gameOverMessage = document.getElementById("game-over-message");
     const winnerMessage = document.getElementById("winner-message");
 
-    function renderBoard() {
+    const isWhitePiece = (piece) => piece && piece === piece.toUpperCase();
+    const isBlackPiece = (piece) => piece && piece === piece.toLowerCase();
+    const isCorrectTurn = (piece) => {
+      return turn === "white" ? isWhitePiece(piece) : isBlackPiece(piece);
+    };
+
+    const isValidMove = (selectedRow, selectedCol, row, col, piece) => {
+      const rowDiff = row - selectedRow;
+      const colDiff = col - selectedCol;
+      switch (piece.toLowerCase()) {
+        case "p": {
+          const direction = piece === "P" ? -1 : 1;
+          if (col === selectedCol && game[row][col] === "" && rowDiff === direction) {
+            return true;
+          }
+          if (
+            col === selectedCol &&
+            selectedRow === (piece === "P" ? 6 : 1) &&
+            game[row][col] === "" &&
+            game[selectedRow + direction][col] === "" &&
+            rowDiff === 2 * direction
+          ) {
+            return true;
+          }
+          if (
+            Math.abs(colDiff) === 1 &&
+            rowDiff === direction &&
+            game[row][col] !== "" &&
+            isWhitePiece(piece) !== isWhitePiece(game[row][col])
+          ) {
+            return true;
+          }
+          return false;
+        }
+        case "r":
+          if (rowDiff !== 0 && colDiff !== 0) return false;
+          return true;
+        case "n":
+          return (Math.abs(rowDiff) === 2 && Math.abs(colDiff) === 1) || (Math.abs(rowDiff) === 1 && Math.abs(colDiff) === 2);
+        case "b":
+          return Math.abs(rowDiff) === Math.abs(colDiff);
+        case "q":
+          return Math.abs(rowDiff) === Math.abs(colDiff) || rowDiff === 0 || colDiff === 0;
+        case "k":
+          return Math.abs(rowDiff) <= 1 && Math.abs(colDiff) <= 1;
+        default:
+          return false;
+      }
+    };
+
+    const renderBoard = () => {
       boardElement.innerHTML = "";
       game.forEach((row, rowIndex) => {
         row.forEach((piece, colIndex) => {
           const square = document.createElement("div");
-          square.className = `Square ${
-            (rowIndex + colIndex) % 2 === 0 ? "light" : "dark"
-          }`;
+          square.className = `Square ${(rowIndex + colIndex) % 2 === 0 ? "light" : "dark"}`;
           if (selectedSquare && selectedSquare[0] === rowIndex && selectedSquare[1] === colIndex) {
             square.classList.add("selected");
           }
@@ -138,15 +171,32 @@
           boardElement.appendChild(square);
         });
       });
-    }
+    };
 
-    function handleClick(row, col) {
+    const handleClick = (row, col) => {
       if (gameOver) return;
-
-      // Implement move logic and game rules here
-      console.log(`Clicked on ${row}, ${col}`);
-      renderBoard();
-    }
+      if (selectedSquare) {
+        const [selectedRow, selectedCol] = selectedSquare;
+        const selectedPiece = game[selectedRow][selectedCol];
+        if (isValidMove(selectedRow, selectedCol, row, col, selectedPiece)) {
+          game[row][col] = selectedPiece;
+          game[selectedRow][selectedCol] = "";
+          if (game[row][col].toLowerCase() === "k") {
+            gameOver = true;
+            winnerMessage.textContent = `${turn.charAt(0).toUpperCase() + turn.slice(1)} Wins!`;
+            gameOverMessage.style.display = "block";
+            return;
+          }
+          turn = turn === "white" ? "black" : "white";
+          turnDisplay.textContent = `Turn: ${turn.charAt(0).toUpperCase() + turn.slice(1)}`;
+          selectedSquare = null;
+          renderBoard();
+        }
+      } else if (game[row][col] && isCorrectTurn(game[row][col])) {
+        selectedSquare = [row, col];
+        renderBoard();
+      }
+    };
 
     document.getElementById("start-button").addEventListener("click", () => {
       document.getElementById("game-info").style.display = "block";
