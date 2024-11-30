@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Assignment-4 React Chess</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        margin: 0;
+        padding: 0;
+        background-color: #282c34;
+        color: white;
+        height: 100vh;
+      }
+      .Board {
+        display: grid;
+        grid-template-columns: repeat(8, 80px);
+        grid-template-rows: repeat(8, 80px);
+      }
+      .Square {
+        width: 80px;
+        height: 80px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        border: 1px solid #999;
+        cursor: pointer;
+      }
+      .light {
+        background-color: #f0d9b5;
+      }
+      .dark {
+        background-color: #b58863;
+      }
+      .selected {
+        background-color: #ffeb3b !important;
+      }
+      img {
+        width: 70px;
+        height: 70px;
+      }
+      .App-header {
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="App">
+      <header class="App-header">
+        <h1 id="game-title">Assignment-4 React Chess</h1>
+        <button id="start-button">Start Game</button>
+        <div id="game-info" style="display: none">
+          <h1>Chess</h1>
+          <button id="tts-toggle">Enable TTS</button>
+          <div id="turn-display">Turn: White</div>
+          <div class="Board" id="board"></div>
+          <div id="game-over-message" style="display: none">
+            <h2 id="winner-message"></h2>
+            <button id="restart-button">Restart Game</button>
+          </div>
+        </div>
+      </header>
+    </div>
+    <script>
+      const initialGameState = [
+        ["r", "n", "b", "q", "k", "b", "n", "r"],
+        ["p", "p", "p", "p", "p", "p", "p", "p"],
+        ["", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", ""],
+        ["", "", "", "", "", "", "", ""],
+        ["P", "P", "P", "P", "P", "P", "P", "P"],
+        ["R", "N", "B", "Q", "K", "B", "N", "R"],
+      ];
+
+      const pieceImages = {
+        r: "https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg",
+        n: "https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg",
+        b: "https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg",
+        q: "https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg",
+        k: "https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg",
+        p: "https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg",
+        R: "https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg",
+        N: "https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg",
+        B: "https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg",
+        Q: "https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg",
+        K: "https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg",
+        P: "https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg",
+      };
+
+      const pieceNames = {
+        p: "pawn",
+        r: "rook",
+        n: "knight",
+        b: "bishop",
+        q: "queen",
+        k: "king",
+        P: "pawn",
+        R: "rook",
+        N: "knight",
+        B: "bishop",
+        Q: "queen",
+        K: "king",
+      };
+
+      const moveSound = new Audio("chess-move.mp3"); // Path to the move sound file
+
+      let game = JSON.parse(JSON.stringify(initialGameState));
+      let turn = "white";
+      let selectedSquare = null;
+      let gameOver = false;
+
+      const boardElement = document.getElementById("board");
+      const turnDisplay = document.getElementById("turn-display");
+      const gameOverMessage = document.getElementById("game-over-message");
+      const winnerMessage = document.getElementById("winner-message");
+
+      const isWhitePiece = (piece) => piece && piece === piece.toUpperCase();
+      const isBlackPiece = (piece) => piece && piece === piece.toLowerCase();
+      const isCorrectTurn = (piece) => {
+        return turn === "white" ? isWhitePiece(piece) : isBlackPiece(piece);
+      };
+
+      const isValidMove = (selectedRow, selectedCol, row, col, piece) => {
+        const rowDiff = row - selectedRow;
+        const colDiff = col - selectedCol;
+        switch (piece.toLowerCase()) {
+          case "p": {
+            const direction = piece === "P" ? -1 : 1;
+            if (
+              col === selectedCol &&
+              game[row][col] === "" &&
+              rowDiff === direction
+            ) {
+              return true;
+            }
+            if (
+              col === selectedCol &&
+              selectedRow === (piece === "P" ? 6 : 1) &&
+              game[row][col] === "" &&
+              game[selectedRow + direction][col] === "" &&
+              rowDiff === 2 * direction
+            ) {
+              return true;
+            }
+            if (
+              Math.abs(colDiff) === 1 &&
+              rowDiff === direction &&
+              game[row][col] !== "" &&
+              isWhitePiece(piece) !== isWhitePiece(game[row][col])
+            ) {
+              return true;
+            }
+            return false;
+          }
+          case "r":
+            if (rowDiff !== 0 && colDiff !== 0) return false;
+            return true;
+          case "n":
+            return (
+              (Math.abs(rowDiff) === 2 && Math.abs(colDiff) === 1) ||
+              (Math.abs(rowDiff) === 1 && Math.abs(colDiff) === 2)
+            );
+          case "b":
+            return Math.abs(rowDiff) === Math.abs(colDiff);
+          case "q":
+            return (
+              Math.abs(rowDiff) === Math.abs(colDiff) ||
+              rowDiff === 0 ||
+              colDiff === 0
+            );
+          case "k":
+            return Math.abs(rowDiff) <= 1 && Math.abs(colDiff) <= 1;
+          default:
+            return false;
+        }
+      };
+
+      const renderBoard = () => {
+        boardElement.innerHTML = "";
+        game.forEach((row, rowIndex) => {
+          row.forEach((piece, colIndex) => {
+            const square = document.createElement("div");
+            square.className = `Square ${
+              (rowIndex + colIndex) % 2 === 0 ? "light" : "dark"
+            }`;
+            if (
+              selectedSquare &&
+              selectedSquare[0] === rowIndex &&
+              selectedSquare[1] === colIndex
+            ) {
+              square.classList.add("selected");
+            }
+            if (piece) {
+              const img = document.createElement("img");
+              img.src = pieceImages[piece];
+              img.alt = piece;
+              square.appendChild(img);
+            }
+            square.addEventListener("click", () =>
+              handleClick(rowIndex, colIndex)
+            );
+            boardElement.appendChild(square);
+          });
+        });
+      };
+
+      let ttsEnabled = false; // TTS disabled by default
+      const ttsButton = document.getElementById("tts-toggle");
+
+      // Function to toggle TTS
+      ttsButton.addEventListener("click", () => {
+        ttsEnabled = !ttsEnabled;
+        ttsButton.textContent = ttsEnabled ? "Disable TTS" : "Enable TTS";
+      });
+
+      const speakMove = (message) => {
+        if (!ttsEnabled) return;
+        const utterance = new SpeechSynthesisUtterance(message);
+        speechSynthesis.speak(utterance);
+      };
+
+      const handleClick = (row, col) => {
+        if (gameOver) return;
+
+        if (
+          selectedSquare &&
+          selectedSquare[0] === row &&
+          selectedSquare[1] === col
+        ) {
+          selectedSquare = null;
+          renderBoard();
+          return;
+        }
+
+        const piece = game[row][col];
+
+        if (selectedSquare) {
+          const [selectedRow, selectedCol] = selectedSquare;
+          const selectedPiece = game[selectedRow][selectedCol];
+
+          if (piece && isWhitePiece(piece) === isWhitePiece(selectedPiece)) {
+            selectedSquare = [row, col];
+            renderBoard();
+            return;
+          }
+
+          if (isValidMove(selectedRow, selectedCol, row, col, selectedPiece)) {
+            const fromPosition = `${String.fromCharCode(97 + selectedCol)}${
+              8 - selectedRow
+            }`;
+            const toPosition = `${String.fromCharCode(97 + col)}${8 - row}`;
+            const captured = game[row][col]
+              ? ` capturing the ${pieceNames[game[row][col]]}`
+              : "";
+
+            // Announce the move
+            speakMove(
+              `${pieceNames[selectedPiece]} moves from ${fromPosition} to ${toPosition}${captured}`
+            );
+
+            if (piece.toLowerCase() === "k") {
+              game[row][col] = selectedPiece;
+              game[selectedRow][selectedCol] = "";
+              renderBoard();
+              gameOver = true;
+              const winner = turn.charAt(0).toUpperCase() + turn.slice(1);
+              speakMove(`${winner} wins by capturing the King!`);
+              winnerMessage.textContent = `${winner} Wins by capturing the King!`;
+              gameOverMessage.style.display = "block";
+              return;
+            }
+
+            game[row][col] = selectedPiece;
+            game[selectedRow][selectedCol] = "";
+            moveSound.play();
+
+            turn = turn === "white" ? "black" : "white";
+            turnDisplay.textContent = `Turn: ${
+              turn.charAt(0).toUpperCase() + turn.slice(1)
+            }`;
+            selectedSquare = null;
+          } else {
+            selectedSquare = [row, col];
+          }
+          renderBoard();
+        } else if (piece && isCorrectTurn(piece)) {
+          selectedSquare = [row, col];
+          renderBoard();
+        }
+      };
+
+      document.getElementById("start-button").addEventListener("click", () => {
+        document.getElementById("game-info").style.display = "block";
+        document.getElementById("start-button").style.display = "none";
+        renderBoard();
+      });
+
+      document
+        .getElementById("restart-button")
+        .addEventListener("click", () => {
+          game = JSON.parse(JSON.stringify(initialGameState));
+          turn = "white";
+          selectedSquare = null;
+          gameOver = false;
+          winnerMessage.textContent = "";
+          gameOverMessage.style.display = "none";
+          turnDisplay.textContent = "Turn: White";
+          renderBoard();
+        });
+
+      renderBoard();
+    </script>
+  </body>
+</html>
