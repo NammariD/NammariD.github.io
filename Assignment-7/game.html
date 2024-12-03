@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fabric.js Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/fabric@5.0.0/dist/fabric.min.js"></script>
+    <audio id="shootSound" src="shoot.mp3" preload="auto"></audio>
+    <audio id="dmgSound" src="dmg.mp3" preload="auto"></audio>
+
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+      canvas {
+        border: 1px solid #000;
+      }
+      #startButton,
+      #restartButton {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 15px 30px;
+        font-size: 20px;
+        cursor: pointer;
+        background-color: paleturquoise;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        display: block;
+      }
+      #startButton.hidden,
+      #restartButton.hidden {
+        display: none;
+      }
+      #scoreDisplay {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        font-size: 24px;
+        color: rgb(0, 0, 0);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <button id="startButton">Start Game</button>
+    <button id="restartButton" class="hidden">Restart Game</button>
+    <div id="scoreDisplay">Targets Hit: 0</div>
+    <!-- Score Display -->
+    <script>
+      const canvas = new fabric.Canvas("canvas");
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      canvas.setWidth(width);
+      canvas.setHeight(height);
+
+      const startButton = document.getElementById("startButton");
+      const restartButton = document.getElementById("restartButton");
+
+      const basePlatform = new fabric.Rect({
+        left: 0,
+        top: height - 400,
+        fill: "brown",
+        width: width,
+        height: 50,
+        selectable: false,
+      });
+      canvas.add(basePlatform);
+
+      const player = new fabric.Rect({
+        left: width / 4 - 25,
+        top: basePlatform.top - 50,
+        fill: "blue",
+        width: 50,
+        height: 50,
+        selectable: false,
+      });
+      canvas.add(player);
+
+      const maxHealth = 100;
+      let playerHealth = maxHealth;
+      const healthBar = new fabric.Rect({
+        left: player.left,
+        top: player.top - 15,
+        fill: "green",
+        width: player.width,
+        height: 10,
+        selectable: false,
+      });
+      canvas.add(healthBar);
+
+      let isJumping = false;
+      let onPlatform = false;
+      const keysPressed = {};
+      const moveSpeed = 5;
+      const gravity = 0.5;
+      let velocityY = 0;
+
+      const damageSquares = [];
+      const triangles = [];
+      const blueObstacles = [];
+      const targets = []; // Array to hold targets
+      let gameStarted = false;
+      const attackableSquares = []; // Array to hold attackable squares
+      const healthBars = []; // Array to hold health bars for each attackable square
+
+      document.addEventListener("keydown", (event) => {
+        keysPressed[event.key] = true;
+      });
+
+      document.addEventListener("keyup", (event) => {
+        keysPressed[event.key] = false;
+      });
+
+      function updateScoreDisplay() {
+        const scoreDisplay = document.getElementById("scoreDisplay");
+        scoreDisplay.textContent = `Targets Hit: ${targetHitCount}`;
+      }
+
+      let shieldActive = false;
+      let shield;
+      let shieldTimeout;
+
+      // Function to activate the shield
+      function activateShield() {
+        if (shieldActive) return; // Prevent multiple activations
+
+        // Create the shield as a circle around the player
+        shield = new fabric.Circle({
+          left: player.left - 10,
+          top: player.top - 10,
+          radius: 35,
+          fill: "rgba(0, 255, 255, 0.3)", // Semi-transparent color for the shield
+          selectable: false,
+        });
+        canvas.add(shield);
+        shieldActive = true;
+
+        // Remove the shield after 3 seconds
+        shieldTimeout = setTimeout(() => {
+          deactivateShield();
+        }, 3000);
+      }
+
+      // Function to deactivate the shield
+      function deactivateShield() {
+        if (shield) {
+          canvas.remove(shield);
+        }
+        shieldActive = false;
+        clearTimeout(shieldTimeout);
+      }
+
+      // Update shield position to follow the player
+      function updateShieldPosition() {
+        if (shieldActive && shield) {
+          shield.left = player.left - 10;
+          shield.top = player.top - 10;
+          canvas.renderAll();
+        }
+      }
+
+      // Listen for spacebar press to activate the shield
+      document.addEventListener("keydown", (event) => {
+        if (event.code === "Space") {
+          activateShield();
+        }
+      });
+
+      // Modify the projectile collision to account for the shield
+      function moveProjectile() {
+        if (!gameActive) return;
+
+        projectile.left += normalizedDirection.x * speed;
+        projectile.top += normalizedDirection.y * speed;
+
+        if (
+          projectile.left < 0 ||
+          projectile.left > width ||
+          projectile.top < 0 ||
+          projectile.top > height
+        ) {
+          canvas.remove(projectile);
+        } else {
+          if (
+            shieldActive && // Check if the shield is active
+            projectile.left < shield.left + shield.radius * 2 &&
+            projectile.left + projectile.radius * 2 > shield.left &&
+            projectile.top < shield.top + shield.radius * 2 &&
+            projectile.top + projectile.radius * 2 > shield.top
+          ) {
+            // If the shield blocks the projectile
+            canvas.remove(projectile);
+          } else if (
+            projectile.left < player.left + player.width &&
+            projectile.left + projectile.radius * 2 > player.left &&
+            projectile.top < player.top + player.height &&
+            projectile.top + projectile.radius * 2 > player.top
+          ) {
+            reduceHealth(10);
+            canvas.remove(projectile);
+          } else {
+            requestAnimationFrame(moveProjectile);
+          }
+        }
+      }
+
+      let triangleInterval,
+        damageSquareInterval,
+        blueObstacleInterval,
+        targetInterval;
+
+      function startGame() {
+        gameStarted = true;
+        targetHitCount = 0; // Reset target hit count
+        updateScoreDisplay(); // Update score display on game start
+        startButton.classList.add("hidden");
+        restartButton.classList.add("hidden");
+
+        // Store interval IDs to later clear them
+        triangleInterval = setInterval(createTriangle, 2000);
+        damageSquareInterval = setInterval(createDamageSquare, 500);
+        blueObstacleInterval = setInterval(createBlueObstacle, 3000);
+        targetInterval = setInterval(createTarget, 4000); // Add target creation
+
+        update();
+      }
+
+      canvas.on("mouse:down", (event) => {
+        if (player.visible) {
+          const pointer = canvas.getPointer(event.e);
+          shootProjectile(pointer.x, pointer.y);
+        }
+      });
+
+      function update() {
+        if (!gameStarted || !gameActive) return; // Check the gameActive flag
+
+        updateShieldPosition(); // Update shield position here
+
+        if (keysPressed["a"]) {
+          player.left = Math.max(0, player.left - moveSpeed);
+          healthBar.left = player.left;
+        }
+        if (keysPressed["d"]) {
+          player.left = Math.min(width - player.width, player.left + moveSpeed);
+          healthBar.left = player.left;
+        }
+        if (keysPressed["w"] && !isJumping) {
+          jump();
+        }
+
+        applyGravity();
+        updateTriangles();
+        updateDamageSquares();
+        updateBlueObstacles();
+        updateTargets(); // Update target positions
+        canvas.renderAll();
+        requestAnimationFrame(update);
+      }
+
+      function jump() {
+        isJumping = true;
+        onPlatform = false;
+        velocityY = -12;
+      }
+
+      function applyGravity() {
+        if (!onPlatform) {
+          velocityY += gravity;
+          player.top += velocityY;
+          healthBar.top = player.top - 15;
+          onPlatform = false;
+
+          if (player.top >= basePlatform.top - player.height) {
+            player.top = basePlatform.top - player.height;
+            healthBar.top = player.top - 15;
+            velocityY = 0;
+            onPlatform = true;
+            isJumping = false;
+          }
+        }
+        canvas.renderAll();
+      }
+
+      function createTriangle() {
+        const triangle = new fabric.Triangle({
+          left: Math.random() * width,
+          top: Math.random() * height,
+          fill: "purple",
+          width: 30,
+          height: 30,
+          selectable: false,
+        });
+        triangles.push(triangle);
+        canvas.add(triangle);
+      }
+
+      function createDamageSquare() {
+        const square = new fabric.Rect({
+          left: Math.random() * (width - 30),
+          top: 0,
+          fill: "red",
+          width: 30,
+          height: 30,
+          selectable: false,
+        });
+        damageSquares.push(square);
+        canvas.add(square);
+      }
+
+      function createBlueObstacle() {
+        const spawnSide = Math.random() < 0.5 ? "left" : "right";
+        const obstacle = new fabric.Rect({
+          left: spawnSide === "left" ? 0 : width - 30,
+          top: basePlatform.top - 30,
+          fill: "blue",
+          width: 30,
+          height: 30,
+          selectable: false,
+        });
+        obstacle.direction = spawnSide === "left" ? 1 : -1;
+        blueObstacles.push(obstacle);
+        canvas.add(obstacle);
+      }
+
+      function createTarget() {
+        if (!gameActive) return; // Only create targets if the game is active
+
+        const radius = 50; // Radius of the target
+        const corners = [
+          { left: radius, top: radius }, // Top-left
+          { left: width - radius * 2, top: radius }, // Top-right
+          { left: radius, top: height - radius * 2 }, // Bottom-left
+          { left: width - radius * 2, top: height - radius * 2 }, // Bottom-right
+        ];
+        const position = corners[Math.floor(Math.random() * corners.length)];
+
+        const target = new fabric.Circle({
+          left: position.left,
+          top: position.top,
+          fill: "orange",
+          radius: radius,
+          selectable: false,
+        });
+        targets.push(target);
+        canvas.add(target);
+      }
+
+      function createAttackableSquare() {
+        const square = new fabric.Rect({
+          left: Math.random() * (width - 30),
+          top: basePlatform.top - 80, // Spawn on the platform
+          fill: "red",
+          width: 80,
+          height: 80,
+          selectable: false,
+        });
+
+        square.health = 300; // Set initial health
+
+        // Create a health bar for the square
+        const healthBar = new fabric.Rect({
+          left: (width - 150) / 2,
+          top: 20,
+          fill: "green",
+          width: 150,
+          height: 20,
+          selectable: false,
+        });
+
+        attackableSquares.push(square);
+        healthBars.push(healthBar);
+        canvas.add(square);
+        canvas.add(healthBar);
+
+        // Add shooting mechanism for the attackable square
+        const shootInterval = setInterval(() => {
+          shootFromSquare(square);
+        }, 2000); // Shoot every 2 seconds
+
+        // Clear the interval if the square is removed
+        square.on("removed", () => clearInterval(shootInterval));
+      }
+
+      function shootFromSquare(square) {
+        const projectile = new fabric.Circle({
+          left: square.left + square.width / 2 - 5,
+          top: square.top + square.height, // Start from the bottom of the square
+          fill: "red", // Color of the projectile
+          radius: 10,
+          selectable: false,
+        });
+
+        const targetX = player.left + player.width / 2;
+        const targetY = player.top + player.height / 2;
+
+        const directionX = targetX - projectile.left;
+        const directionY = targetY - projectile.top;
+        const length = Math.sqrt(
+          directionX * directionX + directionY * directionY
+        );
+        const normalizedDirection = {
+          x: directionX / length,
+          y: directionY / length,
+        };
+
+        canvas.add(projectile);
+
+        const speed = 5; // Speed of the projectile
+        function moveProjectile() {
+          if (!gameActive) return; // Check the gameActive flag
+
+          projectile.left += normalizedDirection.x * speed;
+          projectile.top += normalizedDirection.y * speed;
+
+          // Check if the projectile goes out of bounds
+          if (
+            projectile.left < 0 ||
+            projectile.left > width ||
+            projectile.top < 0 ||
+            projectile.top > height
+          ) {
+            canvas.remove(projectile);
+          } else {
+            // Check collision with the player
+            if (
+              projectile.left < player.left + player.width &&
+              projectile.left + projectile.radius * 2 > player.left &&
+              projectile.top < player.top + player.height &&
+              projectile.top + projectile.radius * 2 > player.top
+            ) {
+              reduceHealth(10); // Reduce player health on hit
+              canvas.remove(projectile); // Remove the projectile
+            } else {
+              requestAnimationFrame(moveProjectile);
+            }
+          }
+        }
+        moveProjectile();
+      }
+
+      let gameActive = true;
+
+      function changeScene() {
+        // Change the background color
+        canvas.setBackgroundColor("lightblue", canvas.renderAll.bind(canvas));
+
+        // Stop all spawning intervals
+        clearInterval(triangleInterval);
+        clearInterval(damageSquareInterval);
+        clearInterval(blueObstacleInterval);
+        clearInterval(targetInterval); // Stop spawning targets
+
+        // Stop all obstacles and projectiles
+        gameActive = false;
+
+        // Remove all current targets
+        targets.forEach((target) => canvas.remove(target));
+        targets.length = 0;
+
+        // Remove all triangles
+        triangles.forEach((triangle) => canvas.remove(triangle));
+        triangles.length = 0;
+
+        // Remove all damage squares
+        damageSquares.forEach((square) => canvas.remove(square));
+        damageSquares.length = 0;
+
+        // Remove all blue obstacles
+        blueObstacles.forEach((obstacle) => canvas.remove(obstacle));
+        blueObstacles.length = 0;
+
+        // Remove any existing projectiles
+        canvas.forEachObject((obj) => {
+          if (obj.type === "circle" && obj.fill === "yellow") {
+            canvas.remove(obj);
+          }
+        });
+
+        resetPlayer();
+
+        // Spawn attackable squares after the scene changes
+        createAttackableSquare(); // Create a new attackable square
+
+        // Allow player movement after the scene change
+        gameActive = true;
+      }
+
+      function resetPlayer() {
+        // Reset the player's position and health
+        playerHealth = maxHealth;
+        player.left = width / 4 - 25;
+        player.top = basePlatform.top - 50;
+        healthBar.left = player.left;
+        healthBar.top = player.top - 15;
+        healthBar.set({ width: player.width });
+        canvas.renderAll();
+      }
+
+      let targetHitCount = 0;
+
+      function updateTargets() {
+        // Check targets
+        targets.forEach((target, index) => {
+          if (target) {
+            // Check if the target is hit by a projectile
+            canvas.forEachObject((obj) => {
+              if (obj.type === "circle" && obj.fill === "yellow") {
+                // If it's a projectile
+                if (
+                  target.left < obj.left + obj.radius * 2 &&
+                  target.left + target.width > obj.left &&
+                  target.top < obj.top + obj.radius * 2 &&
+                  target.top + target.height > obj.top
+                ) {
+                  canvas.remove(target);
+                  canvas.remove(obj); // Remove projectile on hit
+                  targets.splice(index, 1); // Remove target from array
+                  targetHitCount++;
+                  updateScoreDisplay(); // Update score display
+
+                  // Check if the target hit count reaches 2
+                  if (targetHitCount === 2) {
+                    changeScene(); // Change the scene
+                  }
+                }
+              }
+            });
+          }
+        });
+
+        // Check attackable squares
+        attackableSquares.forEach((square, index) => {
+          if (square) {
+            // Check if the square is hit by a projectile
+            canvas.forEachObject((obj) => {
+              if (obj.type === "circle" && obj.fill === "yellow") {
+                // If it's a projectile
+                if (
+                  square.left < obj.left + obj.radius * 2 &&
+                  square.left + square.width > obj.left &&
+                  square.top < obj.top + obj.radius * 2 &&
+                  square.top + square.height > obj.top
+                ) {
+                  square.health -= 10; // Reduce square's health on hit
+                  canvas.remove(obj); // Remove projectile on hit
+
+                  // Update the corresponding health bar
+                  const healthBar = healthBars[index];
+                  if (healthBar) {
+                    const healthPercentage = square.health / 30; // Calculate health percentage
+                    healthBar.set({ width: square.width * healthPercentage });
+                  }
+
+                  if (square.health <= 0) {
+                    canvas.remove(square); // Remove square if health is 0
+                    canvas.remove(healthBar); // Remove corresponding health bar
+                    attackableSquares.splice(index, 1); // Remove square from array
+                    healthBars.splice(index, 1); // Remove health bar from array
+                    targetHitCount++; // Update score
+                    updateScoreDisplay(); // Update score display
+                    showRestartButton(); // Call the function to display the button
+                  }
+                }
+              }
+            });
+          }
+        });
+      }
+
+      function updateTriangles() {
+        if (!gameActive) return; // Check the gameActive flag
+
+        triangles.forEach((triangle, index) => {
+          const directionX = player.left + player.width / 2 - triangle.left;
+          const directionY = player.top + player.height / 2 - triangle.top;
+          const length = Math.sqrt(
+            directionX * directionX + directionY * directionY
+          );
+          const normalizedDirection = {
+            x: directionX / length,
+            y: directionY / length,
+          };
+
+          triangle.left += normalizedDirection.x * 1;
+          triangle.top += normalizedDirection.y * 1;
+
+          if (
+            triangle.left < player.left + player.width &&
+            triangle.left + triangle.width > player.left &&
+            triangle.top < player.top + player.height &&
+            triangle.top + triangle.height > player.top
+          ) {
+            reduceHealth(10);
+            canvas.remove(triangle);
+            triangles.splice(index, 1);
+          }
+        });
+      }
+
+      function updateDamageSquares() {
+        if (!gameActive) return; // Check the gameActive flag
+
+        damageSquares.forEach((square, index) => {
+          square.top += 3;
+
+          if (square.top > height) {
+            canvas.remove(square);
+            damageSquares.splice(index, 1);
+            return;
+          }
+
+          if (
+            square.left < player.left + player.width &&
+            square.left + square.width > player.left &&
+            square.top < player.top + player.height &&
+            square.top + square.height > player.top
+          ) {
+            reduceHealth(20);
+            canvas.remove(square);
+            damageSquares.splice(index, 1);
+          }
+        });
+      }
+
+      function updateBlueObstacles() {
+        if (!gameActive) return; // Check the gameActive flag
+
+        blueObstacles.forEach((obstacle, index) => {
+          obstacle.left += obstacle.direction * 3;
+
+          if (obstacle.left < 0 || obstacle.left > width - obstacle.width) {
+            canvas.remove(obstacle);
+            blueObstacles.splice(index, 1);
+          } else {
+            if (
+              obstacle.left < player.left + player.width &&
+              obstacle.left + obstacle.width > player.left &&
+              obstacle.top < player.top + player.height &&
+              obstacle.top + obstacle.height > player.top
+            ) {
+              reduceHealth(15);
+              canvas.remove(obstacle);
+              blueObstacles.splice(index, 1);
+            }
+          }
+        });
+      }
+
+      const shootSoundSrc = "shoot.mp3";
+
+      function playShootSound() {
+        const shootSound = new Audio(shootSoundSrc);
+        shootSound.play();
+      }
+
+      function shootProjectile(targetX, targetY) {
+        const shootSound = document.getElementById("shootSound");
+        playShootSound(); // Play audio when shooting
+
+        const projectile = new fabric.Circle({
+          left: player.left + player.width / 2 - 5,
+          top: player.top + player.height / 2 - 5,
+          fill: "yellow",
+          radius: 10,
+          selectable: false,
+        });
+
+        const directionX = targetX - projectile.left;
+        const directionY = targetY - projectile.top;
+        const length = Math.sqrt(
+          directionX * directionX + directionY * directionY
+        );
+        const normalizedDirection = {
+          x: directionX / length,
+          y: directionY / length,
+        };
+
+        canvas.add(projectile);
+
+        const speed = 10;
+        function moveProjectile() {
+          if (!gameActive) return; // Check the gameActive flag
+
+          projectile.left += normalizedDirection.x * speed;
+          projectile.top += normalizedDirection.y * speed;
+
+          if (
+            projectile.left < 0 ||
+            projectile.left > width ||
+            projectile.top < 0 ||
+            projectile.top > height
+          ) {
+            canvas.remove(projectile);
+          } else {
+            triangles.forEach((triangle, triIndex) => {
+              if (
+                projectile.left < triangle.left + triangle.width &&
+                projectile.left + projectile.radius * 2 > triangle.left &&
+                projectile.top < triangle.top + triangle.height &&
+                projectile.top + projectile.radius * 2 > triangle.top
+              ) {
+                canvas.remove(triangle);
+                canvas.remove(projectile);
+                triangles.splice(triIndex, 1);
+                return;
+              }
+            });
+            requestAnimationFrame(moveProjectile);
+          }
+        }
+        moveProjectile();
+      }
+
+      const dmgSoundSrc = "dmg.mp3";
+
+      function dmgSound() {
+        const dmgSound = new Audio(dmgSoundSrc);
+        dmgSound.play();
+      }
+
+      function reduceHealth(amount) {
+        playerHealth -= amount;
+        const healthPercentage = Math.max(0, playerHealth / maxHealth);
+        healthBar.set({ width: player.width * healthPercentage });
+        dmgSound();
+
+        if (playerHealth <= 0) {
+          canvas.remove(player);
+          canvas.remove(healthBar);
+          showRestartButton();
+          resetGame();
+        }
+        canvas.renderAll();
+      }
+
+      function showRestartButton() {
+        restartButton.classList.remove("hidden");
+      }
+
+      function resetGame() {
+        playerHealth = maxHealth;
+        player.left = width / 4 - 25;
+        player.top = basePlatform.top - 50;
+        healthBar.left = player.left;
+        healthBar.top = player.top - 15;
+        healthBar.set({ width: player.width });
+
+        triangles.forEach((triangle) => canvas.remove(triangle));
+        triangles.length = 0;
+
+        damageSquares.forEach((square) => canvas.remove(square));
+        damageSquares.length = 0;
+
+        blueObstacles.forEach((obstacle) => canvas.remove(obstacle));
+        blueObstacles.length = 0;
+
+        targets.forEach((target) => canvas.remove(target)); // Remove targets
+        targets.length = 0;
+
+        canvas.renderAll();
+      }
+
+      window.addEventListener("resize", () => {
+        const newWidth = window.innerWidth;
+        const newHeight = window.innerHeight;
+        canvas.setWidth(newWidth);
+        canvas.setHeight(newHeight);
+
+        basePlatform.set({ width: newWidth });
+        canvas.renderAll();
+      });
+
+      startButton.addEventListener("click", startGame);
+      restartButton.addEventListener("click", () => {
+        location.reload(); // Reset the game state
+        restartButton.classList.add("hidden"); // Refresh the page to restart the game
+      });
+    </script>
+  </body>
+</html>
